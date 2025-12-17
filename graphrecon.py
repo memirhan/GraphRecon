@@ -3,7 +3,8 @@ import argparse
 import asyncio
 import aiohttp
 from urllib.parse import urljoin
-__version__ = "1.0.0"
+
+__version__ = "1.1.0"
 
 RED = '\033[91m'
 GREEN = '\033[92m'
@@ -19,69 +20,88 @@ ENDPOINTS = [
 
 
 def Banner():
-    print(r"""
+    print(rf"""
   ________                    .__   __________                            
  /  _____/___________  ______ |  |__\______   \ ____   ____  ____   ____  
 /   \  __\_  __ \__  \ \____ \|  |  \|       _// __ \_/ ___\/  _ \ /    \ 
 \    \_\  \  | \// __ \|  |_> >   Y  \    |   \  ___/\  \__(  <_> )   |  \
  \______  /__|  (____  /   __/|___|  /____|_  /\___  >\___  >____/|___|  /
         \/           \/|__|        \/       \/     \/     \/           \/ 
-                                                                v{}
-                               {}@memirhan{}""".format(__version__, BLUE, RESET))
+                                                                v{__version__}
+                               {BLUE}@memirhan{RESET}
+""")
 
 
-async def GraphQLScanner(url):
-    foundURL = set()
-    url = url if url.startswith(("http://", "https://")) else "http://" + url
+async def check_site(session, url):
+    try:
+        async with session.get(url, allow_redirects=True) as resp:
+            print(f"{BLUE}[+] Site reachable → {url} ({resp.status}){RESET}")
+            return True
+    except Exception:
+        return False
 
+
+async def scan_base(session, base_url, found):
     PAYLOAD = {"query": "{ __typename }"}
-    HEADERS = {"Content-Type": "application/json"}
-
     semaphore = asyncio.Semaphore(15)
-    timeout = aiohttp.ClientTimeout(total=6)
+
+    async def scan(ep):
+        full_url = urljoin(base_url.rstrip("/") + "/", ep)
+        async with semaphore:
+            try:
+                async with session.post(full_url, json=PAYLOAD) as resp:
+                    ct = resp.headers.get("Content-Type", "")
+                    print(f"[DEBUG] {full_url} → {resp.status} | {ct}")
+
+                    if "application/json" in ct:
+                        data = await resp.json()
+                        if "data" in data or "errors" in data:
+                            found.add(full_url)
+                            print(f"{GREEN}[+] GraphQL FOUND → {full_url}{RESET}")
+            except Exception:
+                pass
+
+    await asyncio.gather(*(scan(ep) for ep in ENDPOINTS))
+
+
+async def GraphQLScanner(target):
+    found = set()
+
+    if target.startswith(("http://", "https://")):
+        base_urls = [target]
+    else:
+        base_urls = [f"https://{target}"]
+
+    timeout = aiohttp.ClientTimeout(total=8)
     connector = aiohttp.TCPConnector(ssl=False, limit=50)
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "GraphRecon/1.2"
+    }
 
     async with aiohttp.ClientSession(
         timeout=timeout,
         connector=connector,
-        headers=HEADERS
+        headers=headers
     ) as session:
 
-        try:
-            async with session.get(url, allow_redirects=True) as resp:
-                if resp.status in (200, 301, 302):
-                    print(f"{BLUE}[+] Site reachable ({resp.status}){RESET}")
-        except aiohttp.ClientConnectorError:
-            print(f"{RED}[-] Site not reachable{RESET}")
-            return
-        except asyncio.TimeoutError:
-            print(f"{RED}[-] Site timed out{RESET}")
-            return
+        for base_url in base_urls:
+            if not await check_site(session, base_url):
+                continue
 
-        async def scan(ep):
-            fullURL = urljoin(url.rstrip("/") + "/", ep).rstrip("/")
-            async with semaphore:
-                try:
-                    async with session.post(fullURL, json=PAYLOAD) as resp:
-                        if "application/json" in resp.headers.get("Content-Type", ""):
-                            data = await resp.json()
-                            if "data" in data or "errors" in data:
-                                if fullURL not in foundURL:
-                                    foundURL.add(fullURL)
-                                    print(f"{GREEN}[+] GraphQL FOUND → {fullURL}{RESET}")
-                except:
-                    pass
+            await scan_base(session, base_url, found)
 
-        await asyncio.gather(*(scan(ep) for ep in ENDPOINTS))
+            if found and base_url.startswith("https://"):
+                break
 
-    if not foundURL:
+    if not found:
         print(f"{RED}[-] GraphQL NOT FOUND{RESET}")
 
 
 def main():
     Banner()
-    parser = argparse.ArgumentParser(description="Fast async GraphQL scanner")
-    parser.add_argument("-u", "--url", required=True, help="Target site URL")
+    parser = argparse.ArgumentParser(description="Async GraphQL scanner")
+    parser.add_argument("-u", "--url", required=True, help="Target domain or URL")
     args = parser.parse_args()
 
     print(f"{YELLOW}[*] Scanning is starting{RESET}")
