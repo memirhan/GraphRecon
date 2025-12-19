@@ -4,9 +4,9 @@
 It scans common and misconfigured API paths to identify exposed GraphQL endpoints.
 
 Designed for:
-- Bug bounty hunters
-- Pentesters
 - Security researchers
+- Pentesters
+- Bug hunters
 
 ---
 
@@ -23,8 +23,11 @@ Designed for:
 
 ## 📦 Installation
 
-### Homebrew (macOS & Linux)
+### Homebrew (Windows, macOS, Linux)
 
 ```bash
-brew tap memirhan/graphrecon
-brew install graphrecon
+pip install graphrecon
+```
+
+## Follow us
+[Pentest Project Instagram](https://instagram.com/pentestproject)
