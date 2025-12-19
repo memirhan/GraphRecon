@@ -4,7 +4,7 @@ import asyncio
 import aiohttp
 from urllib.parse import urljoin
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 RED = '\033[91m'
 GREEN = '\033[92m'
@@ -37,7 +37,7 @@ def Banner():
  \______  /__|  (____  /   __/|___|  /____|_  /\___  >\___  >____/|___|  /
         \/           \/|__|        \/       \/     \/     \/           \/ 
                                                                 v{__version__}
-                               {BLUE}@memirhan{RESET}
+                            {GREEN}pentestproject{RESET}
 """)
 
 
