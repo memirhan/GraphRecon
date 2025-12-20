@@ -4,7 +4,7 @@ import asyncio
 import aiohttp
 from urllib.parse import urljoin
 
-__version__ = "1.1.1"
+__version__ = "1.2.1"
 
 RED = '\033[91m'
 GREEN = '\033[92m'
@@ -26,6 +26,23 @@ ENDPOINTS = [
     "v1/graphql/api", "v2/graphql/api", "api/v1/graphql/v1", "api/v2/graphql/v2",
     "v1/api/graphql/v1", "v2/api/graphql/v2"
 ]
+
+INTROSPECTION_QUERY = {
+    "query": """
+    query IntrospectionQuery {
+      __schema {
+        queryType { name }
+        mutationType { name }
+        subscriptionType { name }
+        types {
+          name
+          kind
+          description
+        }
+      }
+    }
+    """
+}
 
 
 def Banner():
@@ -61,19 +78,40 @@ async def scan_base(session, base_url, found):
                 async with session.post(full_url, json=PAYLOAD) as resp:
                     ct = resp.headers.get("Content-Type", "")
                     print(f"[DEBUG] {full_url} → {resp.status} | {ct}")
-
                     if "application/json" in ct:
                         data = await resp.json()
                         if "data" in data or "errors" in data:
-                            found.add(full_url)
-                            print(f"{GREEN}[+] GraphQL FOUND → {full_url}{RESET}")
+                            if full_url not in found:
+                                found.add(full_url)
+                                print(f"{GREEN}[+] GraphQL FOUND → {full_url}{RESET}")
             except Exception:
                 pass
 
     await asyncio.gather(*(scan(ep) for ep in ENDPOINTS))
 
 
-async def GraphQLScanner(target):
+async def fetch_schema(session, graphql_url):
+    try:
+        async with session.post(graphql_url, json=INTROSPECTION_QUERY) as resp:
+            if resp.status != 200:
+                print(f"{RED}[-] Introspection failed ({resp.status}){RESET}")
+                return
+
+            data = await resp.json()
+            if "data" in data and "__schema" in data["data"]:
+                schema = data["data"]["__schema"]
+                print(f"{GREEN}[+] Schema extracted from {graphql_url}{RESET}")
+                for t in schema["types"]:
+                    print(f"  - {t['name']} ({t['kind']})")
+            else:
+                print(f"{YELLOW}[*] Introspection disabled → {graphql_url}{RESET}")
+
+    except Exception as e:
+        print(f"{RED}[-] Schema error → {e}{RESET}")
+
+
+
+async def GraphQLScanner(target, fetch_schema_flag):
     found = set()
 
     if target.startswith(("http://", "https://")):
@@ -100,21 +138,35 @@ async def GraphQLScanner(target):
 
             await scan_base(session, base_url, found)
 
-            if found and base_url.startswith("https://"):
-                break
+        if not found:
+            print(f"{RED}[-] GraphQL NOT FOUND{RESET}")
+            return
 
-    if not found:
-        print(f"{RED}[-] GraphQL NOT FOUND{RESET}")
+        if fetch_schema_flag:
+            for graphql_url in found:
+                choice = input(
+                    f"{GREEN}[?] Schema found at {graphql_url}. Fetch schema? (y/N): {RESET}"
+                ).strip().lower()
+
+                if choice == "y":
+                    await fetch_schema(session, graphql_url)
+
+                elif choice == "n":
+                    print(f"{YELLOW}[*] Skipped {graphql_url}{RESET}")
+
+                else:
+                    print(f"{YELLOW}[*] Skipped {graphql_url}{RESET}")
 
 
 def main():
     Banner()
     parser = argparse.ArgumentParser(description="Async GraphQL scanner")
     parser.add_argument("-u", "--url", required=True, help="Target domain or URL")
+    parser.add_argument("--schema", action="store_true", help="Try to fetch GraphQL schema")
     args = parser.parse_args()
 
     print(f"{YELLOW}[*] Scanning is starting{RESET}")
-    asyncio.run(GraphQLScanner(args.url))
+    asyncio.run(GraphQLScanner(args.url, args.schema))
 
 
 if __name__ == "__main__":

@@ -14,20 +14,20 @@ Designed for:
 
 - 🚀 Fully asynchronous (aiohttp + asyncio)
 - 🔍 Detects GraphQL via real GraphQL queries
-- 📍 Scans dozens of common GraphQL/API paths
-- 🧠 Stops duplicate results
-- 🌐 Detects if target is reachable
-- 🎯 Clean CLI usage
+- 📍 Scans dozens of common GraphQL / API paths
+- 🧠 Prevents duplicate endpoint results
+- 🌐 Checks if the target is reachable
+- 🧪 Uses safe GraphQL payloads (`__typename`)
+- 📄 **Optional GraphQL schema (introspection) fetching**
+- ❓ **Prompts the user before fetching schemas**
+- 🧾 **Lists discovered GraphQL types (Query / Mutation / Objects)**
+- 🎯 Clean and simple CLI usage
 
 ---
 
 ## 📦 Installation
 
-### Homebrew (Windows, macOS, Linux)
+### pip (Windows, macOS, Linux)
 
 ```bash
 pip install graphrecon
-```
-
-## Follow us
-[Pentest Project Instagram](https://instagram.com/pentestproject)
