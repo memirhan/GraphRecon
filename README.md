@@ -18,9 +18,10 @@ Designed for:
 - 🧠 Prevents duplicate endpoint results
 - 🌐 Checks if the target is reachable
 - 🧪 Uses safe GraphQL payloads (`__typename`)
-- 📄 **Optional GraphQL schema (introspection) fetching**
-- ❓ **Prompts the user before fetching schemas**
-- 🧾 **Lists discovered GraphQL types (Query / Mutation / Objects)**
+- 📄 Optional GraphQL schema (introspection) fetching
+- ❓ Prompts the user before fetching schemas
+- 🧾 Lists discovered GraphQL types (Query / Mutation / Objects)
+- 📂 Bulk scanning from a target list file
 - 🎯 Clean and simple CLI usage
 
 ---

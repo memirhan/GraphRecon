@@ -4,7 +4,7 @@ import asyncio
 import aiohttp
 from urllib.parse import urljoin
 
-__version__ = "1.2.1"
+__version__ = "1.3.1"
 
 RED = '\033[91m'
 GREEN = '\033[92m'
@@ -56,6 +56,17 @@ def Banner():
                                                                 v{__version__}
                             {GREEN}pentestproject{RESET}
 """)
+
+
+def read_targets_from_file(path):
+    targets = []
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            targets.append(line)
+    return targets
 
 
 async def check_site(session, url):
@@ -161,12 +172,27 @@ async def GraphQLScanner(target, fetch_schema_flag):
 def main():
     Banner()
     parser = argparse.ArgumentParser(description="Async GraphQL scanner")
-    parser.add_argument("-u", "--url", required=True, help="Target domain or URL")
+
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("-u", "--url", help="Target domain or URL")
+    group.add_argument("-l", "--list", help="Path to txt file containing targets (one per line)")
+
     parser.add_argument("--schema", action="store_true", help="Try to fetch GraphQL schema")
     args = parser.parse_args()
 
     print(f"{YELLOW}[*] Scanning is starting{RESET}")
-    asyncio.run(GraphQLScanner(args.url, args.schema))
+
+    if args.list:
+        targets = read_targets_from_file(args.list)
+        if not targets:
+            print(f"{RED}[-] Target list is empty or unreadable{RESET}")
+            return
+
+        for t in targets:
+            print(f"{YELLOW}[*] Scanning target: {t}{RESET}")
+            asyncio.run(GraphQLScanner(t, args.schema))
+    else:
+        asyncio.run(GraphQLScanner(args.url, args.schema))
 
 
 if __name__ == "__main__":
