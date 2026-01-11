@@ -4,7 +4,7 @@ import asyncio
 import aiohttp
 from urllib.parse import urljoin, urlparse
 
-__version__ = "1.4.0"
+__version__ = "1.4.1"
 
 RED = '\033[91m'
 GREEN = '\033[92m'
@@ -62,7 +62,6 @@ def Banner():
 
 
 def normalize_target(line: str) -> str | None:
-
     s = line.strip()
     if not s or s.startswith("#"):
         return None
@@ -155,7 +154,17 @@ async def fetch_schema(session, graphql_url):
         print(f"{RED}[-] Schema error → {e}{RESET}")
 
 
-async def GraphQLScanner(target, fetch_schema_flag, ep_concurrency: int):
+async def GraphQLScanner(
+    target: str,
+    fetch_schema_flag: bool,
+    ep_concurrency: int,
+    interactive_schema_prompt: bool = True
+):
+    """
+    interactive_schema_prompt:
+      - True  => your original behavior: prompt per found endpoint (best for single target)
+      - False => do not prompt (useful for --list scans). Still returns found endpoints.
+    """
     found = set()
 
     if target.startswith(("http://", "https://")):
@@ -184,10 +193,10 @@ async def GraphQLScanner(target, fetch_schema_flag, ep_concurrency: int):
 
         if not found:
             print(f"{RED}[-] GraphQL NOT FOUND{RESET}")
-            return
+            return set()
 
-        if fetch_schema_flag:
-            for graphql_url in found:
+        if fetch_schema_flag and interactive_schema_prompt:
+            for graphql_url in sorted(found):
                 choice = input(
                     f"{GREEN}[?] Schema found at {graphql_url}. Fetch schema? (y/N): {RESET}"
                 ).strip().lower()
@@ -197,16 +206,62 @@ async def GraphQLScanner(target, fetch_schema_flag, ep_concurrency: int):
                 else:
                     print(f"{YELLOW}[*] Skipped {graphql_url}{RESET}")
 
+    return found
 
-async def run_targets_concurrently(targets, fetch_schema_flag, tconcurrency: int, ep_concurrency: int):
+
+async def fetch_schemas_after_bulk(schema_urls: set[str]):
+    """
+    After bulk scan, optionally fetch schemas for all discovered GraphQL endpoints.
+    """
+    if not schema_urls:
+        return
+
+    choice = input(
+        f"{GREEN}[?] Bulk scan finished. {len(schema_urls)} GraphQL endpoints found. Fetch schemas now? (y/N): {RESET}"
+    ).strip().lower()
+
+    if choice != "y":
+        print(f"{YELLOW}[*] Skipped schema fetching{RESET}")
+        return
+
+    timeout = aiohttp.ClientTimeout(total=12)
+    connector = aiohttp.TCPConnector(ssl=False, limit=50)
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": f"GraphRecon/{__version__}"
+    }
+
+    async with aiohttp.ClientSession(timeout=timeout, connector=connector, headers=headers) as session:
+        for u in sorted(schema_urls):
+            print(f"{BLUE}[*] Fetching schema → {u}{RESET}")
+            await fetch_schema(session, u)
+
+
+async def run_targets_concurrently(
+    targets,
+    fetch_schema_flag: bool,
+    tconcurrency: int,
+    ep_concurrency: int
+):
     sem = asyncio.Semaphore(tconcurrency)
+    all_found_graphql_urls: set[str] = set()
 
     async def runner(t, idx: int):
         async with sem:
             print(f"{YELLOW}[*] ({idx}/{len(targets)}) Scanning target: {t}{RESET}")
-            await GraphQLScanner(t, fetch_schema_flag, ep_concurrency)
+            found = await GraphQLScanner(
+                t,
+                fetch_schema_flag=fetch_schema_flag,
+                ep_concurrency=ep_concurrency,
+                interactive_schema_prompt=False
+            )
+            if found:
+                all_found_graphql_urls.update(found)
 
     await asyncio.gather(*(runner(t, i + 1) for i, t in enumerate(targets)))
+
+    if fetch_schema_flag and all_found_graphql_urls:
+        await fetch_schemas_after_bulk(all_found_graphql_urls)
 
 
 async def async_main():
@@ -216,8 +271,8 @@ async def async_main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("-u", "--url", help="Target domain or URL")
     group.add_argument("-l", "--list", help="Path to txt file containing targets (one per line)")
-    parser.add_argument("--schema", action="store_true", help="Try to fetch GraphQL schema (interactive)")
-    
+
+    parser.add_argument("--schema", action="store_true", help="Try to fetch GraphQL schema")
 
     args = parser.parse_args()
 
@@ -230,9 +285,19 @@ async def async_main():
             return
 
         print(f"{BLUE}[+] Loaded {len(targets)} unique targets from {args.list}{RESET}")
-        await run_targets_concurrently(targets, args.schema, TARGET_CONCURRENCY, ENDPOINT_CONCURRENCY)
+        await run_targets_concurrently(
+            targets,
+            fetch_schema_flag=args.schema,
+            tconcurrency=TARGET_CONCURRENCY,
+            ep_concurrency=ENDPOINT_CONCURRENCY
+        )
     else:
-        await GraphQLScanner(args.url, args.schema, ENDPOINT_CONCURRENCY)
+        await GraphQLScanner(
+            args.url,
+            fetch_schema_flag=args.schema,
+            ep_concurrency=ENDPOINT_CONCURRENCY,
+            interactive_schema_prompt=True
+        )
 
 
 def main():
