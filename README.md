@@ -22,6 +22,9 @@ Designed for:
 - ❓ Prompts the user before fetching schemas
 - 🧾 Lists discovered GraphQL types (Query / Mutation / Objects)
 - 📂 Bulk scanning from a target list file
+- ⚡ Parallel bulk scanning (scans multiple targets concurrently for speed)
+- 🧹 Auto-normalizes list targets (supports plain domains per line, removes duplicates)
+- 📊 Shows total loaded target count + scan progress (e.g. `3/120`)
 - 🎯 Clean and simple CLI usage
 
 ---

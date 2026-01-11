@@ -2,9 +2,9 @@
 import argparse
 import asyncio
 import aiohttp
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
-__version__ = "1.3.1"
+__version__ = "1.4.0"
 
 RED = '\033[91m'
 GREEN = '\033[92m'
@@ -17,14 +17,14 @@ ENDPOINTS = [
     "v4/graphql", "api/v3", "api/v4", "v3/api", "v4/api", "v3/api/v1", "v3/api/v2",
     "v4/api/v1", "v4/api/v2", "graphql/v3/api", "graphql/v4/api", "v3/graphql/api",
     "v4/graphql/api", "api/v3/graphql/v1", "api/v4/graphql/v2", "v1/api/graphql/v3",
-    "v2/api/graphql/v4", "v3/graphql/v1/api", "v4/graphql/v2/api","v1/graphql/v3/api",
+    "v2/api/graphql/v4", "v3/graphql/v1/api", "v4/graphql/v2/api", "v1/graphql/v3/api",
     "v2/graphql/v4/api", "v3/api/graphql/v1", "v4/api/graphql/v2", "graphql/v1/api/v3",
     "graphql/v2/api/v4", "graphql", "api/graphql", "v1/graphql", "v2/graphql", "api",
     "graphql/api", "v1/api", "v2/api", "graphql/v1", "graphql/v2", "api/v1/graphql",
     "api/v2/graphql", "v1/api/graphql", "v2/api/graphql", "v1", "v2", "api/v1", "api/v2",
     "v1/api/v1", "v1/api/v2", "v2/api/v1", "v2/api/v2", "graphql/v1/api", "graphql/v2/api",
     "v1/graphql/api", "v2/graphql/api", "api/v1/graphql/v1", "api/v2/graphql/v2",
-    "v1/api/graphql/v1", "v2/api/graphql/v2"
+    "v1/api/graphql/v1", "v2/api/graphql/v2", "graphiql", "graphql/query"
 ]
 
 INTROSPECTION_QUERY = {
@@ -44,6 +44,9 @@ INTROSPECTION_QUERY = {
     """
 }
 
+TARGET_CONCURRENCY = 20
+ENDPOINT_CONCURRENCY = 20
+
 
 def Banner():
     print(rf"""
@@ -58,14 +61,45 @@ def Banner():
 """)
 
 
+def normalize_target(line: str) -> str | None:
+
+    s = line.strip()
+    if not s or s.startswith("#"):
+        return None
+
+    s = s.replace("\x00", "").strip()
+
+    if s.startswith(("http://", "https://")):
+        p = urlparse(s)
+        host = p.netloc.strip()
+        if not host:
+            return None
+        return host
+
+    if "/" in s:
+        s = s.split("/", 1)[0].strip()
+
+    s = s.strip().strip(".")
+    if not s:
+        return None
+
+    return s
+
+
 def read_targets_from_file(path):
+    seen = set()
     targets = []
+
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
+        for raw in f:
+            t = normalize_target(raw)
+            if not t:
                 continue
-            targets.append(line)
+            if t in seen:
+                continue
+            seen.add(t)
+            targets.append(t)
+
     return targets
 
 
@@ -78,9 +112,9 @@ async def check_site(session, url):
         return False
 
 
-async def scan_base(session, base_url, found):
+async def scan_base(session, base_url, found, ep_concurrency: int):
     PAYLOAD = {"query": "{ __typename }"}
-    semaphore = asyncio.Semaphore(15)
+    semaphore = asyncio.Semaphore(ep_concurrency)
 
     async def scan(ep):
         full_url = urljoin(base_url.rstrip("/") + "/", ep)
@@ -90,8 +124,8 @@ async def scan_base(session, base_url, found):
                     ct = resp.headers.get("Content-Type", "")
                     print(f"[DEBUG] {full_url} → {resp.status} | {ct}")
                     if "application/json" in ct:
-                        data = await resp.json()
-                        if "data" in data or "errors" in data:
+                        data = await resp.json(content_type=None)
+                        if isinstance(data, dict) and ("data" in data or "errors" in data):
                             if full_url not in found:
                                 found.add(full_url)
                                 print(f"{GREEN}[+] GraphQL FOUND → {full_url}{RESET}")
@@ -108,12 +142,12 @@ async def fetch_schema(session, graphql_url):
                 print(f"{RED}[-] Introspection failed ({resp.status}){RESET}")
                 return
 
-            data = await resp.json()
-            if "data" in data and "__schema" in data["data"]:
+            data = await resp.json(content_type=None)
+            if isinstance(data, dict) and "data" in data and "__schema" in data["data"]:
                 schema = data["data"]["__schema"]
                 print(f"{GREEN}[+] Schema extracted from {graphql_url}{RESET}")
-                for t in schema["types"]:
-                    print(f"  - {t['name']} ({t['kind']})")
+                for t in schema.get("types", []):
+                    print(f"  - {t.get('name')} ({t.get('kind')})")
             else:
                 print(f"{YELLOW}[*] Introspection disabled → {graphql_url}{RESET}")
 
@@ -121,8 +155,7 @@ async def fetch_schema(session, graphql_url):
         print(f"{RED}[-] Schema error → {e}{RESET}")
 
 
-
-async def GraphQLScanner(target, fetch_schema_flag):
+async def GraphQLScanner(target, fetch_schema_flag, ep_concurrency: int):
     found = set()
 
     if target.startswith(("http://", "https://")):
@@ -134,7 +167,7 @@ async def GraphQLScanner(target, fetch_schema_flag):
     connector = aiohttp.TCPConnector(ssl=False, limit=50)
     headers = {
         "Content-Type": "application/json",
-        "User-Agent": "GraphRecon/1.2"
+        "User-Agent": f"GraphRecon/{__version__}"
     }
 
     async with aiohttp.ClientSession(
@@ -147,7 +180,7 @@ async def GraphQLScanner(target, fetch_schema_flag):
             if not await check_site(session, base_url):
                 continue
 
-            await scan_base(session, base_url, found)
+            await scan_base(session, base_url, found, ep_concurrency)
 
         if not found:
             print(f"{RED}[-] GraphQL NOT FOUND{RESET}")
@@ -161,23 +194,31 @@ async def GraphQLScanner(target, fetch_schema_flag):
 
                 if choice == "y":
                     await fetch_schema(session, graphql_url)
-
-                elif choice == "n":
-                    print(f"{YELLOW}[*] Skipped {graphql_url}{RESET}")
-
                 else:
                     print(f"{YELLOW}[*] Skipped {graphql_url}{RESET}")
 
 
-def main():
+async def run_targets_concurrently(targets, fetch_schema_flag, tconcurrency: int, ep_concurrency: int):
+    sem = asyncio.Semaphore(tconcurrency)
+
+    async def runner(t, idx: int):
+        async with sem:
+            print(f"{YELLOW}[*] ({idx}/{len(targets)}) Scanning target: {t}{RESET}")
+            await GraphQLScanner(t, fetch_schema_flag, ep_concurrency)
+
+    await asyncio.gather(*(runner(t, i + 1) for i, t in enumerate(targets)))
+
+
+async def async_main():
     Banner()
     parser = argparse.ArgumentParser(description="Async GraphQL scanner")
 
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("-u", "--url", help="Target domain or URL")
     group.add_argument("-l", "--list", help="Path to txt file containing targets (one per line)")
+    parser.add_argument("--schema", action="store_true", help="Try to fetch GraphQL schema (interactive)")
+    
 
-    parser.add_argument("--schema", action="store_true", help="Try to fetch GraphQL schema")
     args = parser.parse_args()
 
     print(f"{YELLOW}[*] Scanning is starting{RESET}")
@@ -188,11 +229,14 @@ def main():
             print(f"{RED}[-] Target list is empty or unreadable{RESET}")
             return
 
-        for t in targets:
-            print(f"{YELLOW}[*] Scanning target: {t}{RESET}")
-            asyncio.run(GraphQLScanner(t, args.schema))
+        print(f"{BLUE}[+] Loaded {len(targets)} unique targets from {args.list}{RESET}")
+        await run_targets_concurrently(targets, args.schema, TARGET_CONCURRENCY, ENDPOINT_CONCURRENCY)
     else:
-        asyncio.run(GraphQLScanner(args.url, args.schema))
+        await GraphQLScanner(args.url, args.schema, ENDPOINT_CONCURRENCY)
+
+
+def main():
+    asyncio.run(async_main())
 
 
 if __name__ == "__main__":
