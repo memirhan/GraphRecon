@@ -4,7 +4,7 @@ import asyncio
 import aiohttp
 from urllib.parse import urljoin, urlparse
 
-__version__ = "1.4.1"
+__version__ = "1.4.2"
 
 RED = '\033[91m'
 GREEN = '\033[92m'
@@ -24,7 +24,7 @@ ENDPOINTS = [
     "api/v2/graphql", "v1/api/graphql", "v2/api/graphql", "v1", "v2", "api/v1", "api/v2",
     "v1/api/v1", "v1/api/v2", "v2/api/v1", "v2/api/v2", "graphql/v1/api", "graphql/v2/api",
     "v1/graphql/api", "v2/graphql/api", "api/v1/graphql/v1", "api/v2/graphql/v2",
-    "v1/api/graphql/v1", "v2/api/graphql/v2", "graphiql", "graphql/query"
+    "v1/api/graphql/v1", "v2/api/graphql/v2", "graphiql", "graphql/query", "_v/graphql"
 ]
 
 INTROSPECTION_QUERY = {
@@ -170,7 +170,7 @@ async def GraphQLScanner(
     if target.startswith(("http://", "https://")):
         base_urls = [target]
     else:
-        base_urls = [f"https://{target}"]
+        base_urls = [f"http://{target}"]
 
     timeout = aiohttp.ClientTimeout(total=8)
     connector = aiohttp.TCPConnector(ssl=False, limit=50)

@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="graphrecon",
-    version="1.4.1",
+    version="1.4.2",
     py_modules=["graphrecon"],
     install_requires=[
         "aiohttp>=3.9.0"
